@@ -2,4 +2,4 @@
  (name prep)
  (public_name voodoo-prep)
  (package voodoo-prep)
- (libraries cmdliner fpath bos opam-format))
+ (libraries cmdliner fpath bos opam-format findlib))

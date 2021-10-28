@@ -66,6 +66,40 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
       Util.write_file Fpath.(dest // set_ext "ocamlobjinfo" fpath) lines)
     actions.objinfo
 
+let do_jsoo root pkg_contents findlib_cmas =
+  let open Bos in
+  List.iter (fun (package, contents) ->
+    let dest = Package.prep_path package in
+    let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
+    let findlib_pkgs = List.filter_map (fun p -> try Some (p, List.assoc Fpath.(root // p) findlib_cmas) with Not_found ->
+      Format.eprintf "XXX No findlib pkg for archive %s\n%!" (Fpath.to_string p); None ) cmas in
+    let jsoo = Bos.Cmd.v "js_of_ocaml" in
+    let jsoo_mkcmis = Bos.Cmd.v "jsoo_mkcmis" in
+    List.iter (fun (cma_fpath, findlib_pkg) ->
+      let name = Fpath.basename cma_fpath in
+      let cmd = Cmd.(jsoo % Fpath.(to_string (root // cma_fpath)) % "-o" % Fpath.(to_string (dest / (name ^ ".js") ))) in
+      ignore (Util.lines_of_process cmd);
+      let cmd = Cmd.(jsoo_mkcmis % findlib_pkg % "-o" % Fpath.(to_string (dest / (name ^ ".cmis.js") ))) in
+      ignore (Util.lines_of_process cmd);
+      let deps = 
+        try
+          Findlib.package_deep_ancestors ["byte";"javascript"] [findlib_pkg] |>
+          List.filter_map (fun p -> try Some (Findlib.package_directory p ^ "/" ^ Findlib.package_property ["byte";"javascript"] p "archive") with _ -> None) 
+        with _ -> []
+      in
+      let opam_packages =
+        List.filter_map (fun cma_path ->
+          match List.find_opt (fun (_, contents) -> List.exists (fun p -> Fpath.(to_string (root // p)) = cma_path) contents) pkg_contents with
+          | Some (pkg, _) -> Some (pkg, cma_path)
+          | None -> Format.eprintf "Failed to find package containing %s\n%!" cma_path;
+          None) deps
+      in
+      Util.write_file Fpath.(dest / "jsoo.deps") (List.map (fun ((universe, name, version), cma_path) ->
+        Format.sprintf "%s %s %s %s" universe name version (Fpath.basename (Fpath.v cma_path))) opam_packages)
+
+      ) findlib_pkgs
+     ) pkg_contents
+
 let run _ (universes : (string * string) list) =
   let get_universe =
     match universes with
@@ -92,6 +126,14 @@ let run _ (universes : (string * string) list) =
            match get_universe pkg with Some pkg -> pkg :: acc | None -> acc)
          []
   in
+
+  let findlib_cmas =
+    List.filter_map (fun pkg ->
+      try
+        let archives = Findlib.package_property ["byte"; "javascript"] pkg "archive" in
+        let path = Findlib.package_directory pkg in
+        Some (Fpath.v (Printf.sprintf "%s/%s" path archives), pkg)
+      with _ -> None) (Findlib.list_packages' ()) in
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
     List.map
@@ -110,4 +152,6 @@ let run _ (universes : (string * string) list) =
           let dest = Package.prep_path package in
           Util.write_file Fpath.(dest / "opam") lines
       | None -> ())
-    packages
+    packages;
+  do_jsoo root pkg_contents findlib_cmas
+  
