@@ -32,7 +32,9 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     let no_ext = Fpath.rem_ext filename in
     let has_hyphen = String.contains (Fpath.to_string filename) '-' in
     let is_module =
-      process_ocaml_artefacts && List.mem ext [ ".cmt"; ".cmti"; ".cmi" ] && not has_hyphen
+      process_ocaml_artefacts
+      && List.mem ext [ ".cmt"; ".cmti"; ".cmi" ]
+      && not has_hyphen
     in
     let do_copy =
       (not in_build_dir)
@@ -68,37 +70,129 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
 
 let do_jsoo root pkg_contents findlib_cmas =
   let open Bos in
-  List.iter (fun (package, contents) ->
-    let dest = Package.prep_path package in
-    let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
-    let findlib_pkgs = List.filter_map (fun p -> try Some (p, List.assoc Fpath.(root // p) findlib_cmas) with Not_found ->
-      Format.eprintf "XXX No findlib pkg for archive %s\n%!" (Fpath.to_string p); None ) cmas in
-    let jsoo = Bos.Cmd.v "js_of_ocaml" in
-    let jsoo_mkcmis = Bos.Cmd.v "jsoo_mkcmis" in
-    List.iter (fun (cma_fpath, findlib_pkg) ->
-      let name = Fpath.basename cma_fpath in
-      let cmd = Cmd.(jsoo % Fpath.(to_string (root // cma_fpath)) % "-o" % Fpath.(to_string (dest / (name ^ ".js") ))) in
-      ignore (Util.lines_of_process cmd);
-      let cmd = Cmd.(jsoo_mkcmis % findlib_pkg % "-o" % Fpath.(to_string (dest / (name ^ ".cmis.js") ))) in
-      ignore (Util.lines_of_process cmd);
-      let deps = 
-        try
-          Findlib.package_deep_ancestors ["byte";"javascript"] [findlib_pkg] |>
-          List.filter_map (fun p -> try Some (Findlib.package_directory p ^ "/" ^ Findlib.package_property ["byte";"javascript"] p "archive") with _ -> None) 
-        with _ -> []
+  List.iter
+    (fun (package, contents) ->
+      let dest = Package.prep_path package in
+      let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
+      let findlib_pkgs =
+        List.filter_map
+          (fun p ->
+            try Some (p, List.assoc Fpath.(root // p) findlib_cmas)
+            with Not_found ->
+              Format.eprintf "XXX No findlib pkg for archive %s\n%!"
+                (Fpath.to_string p);
+              None)
+          cmas
       in
-      let opam_packages =
-        List.filter_map (fun cma_path ->
-          match List.find_opt (fun (_, contents) -> List.exists (fun p -> Fpath.(to_string (root // p)) = cma_path) contents) pkg_contents with
-          | Some (pkg, _) -> Some (pkg, cma_path)
-          | None -> Format.eprintf "Failed to find package containing %s\n%!" cma_path;
-          None) deps
-      in
-      Util.write_file Fpath.(dest / "jsoo.deps") (List.map (fun ((universe, name, version), cma_path) ->
-        Format.sprintf "%s %s %s %s" universe name version (Fpath.basename (Fpath.v cma_path))) opam_packages)
+      let jsoo = Bos.Cmd.v "js_of_ocaml" in
+      let jsoo_mkcmis = Bos.Cmd.v "jsoo_mkcmis" in
+      List.iter
+        (fun (cma_fpath, findlib_pkg) ->
+          let name = Fpath.basename cma_fpath in
+          let cmd =
+            Cmd.(
+              jsoo
+              % Fpath.(to_string (root // cma_fpath))
+              % "-o"
+              % Fpath.(to_string (dest / (name ^ ".js"))))
+          in
+          ignore (Util.lines_of_process cmd);
+          let cmd =
+            Cmd.(
+              jsoo_mkcmis % findlib_pkg % "-o"
+              % Fpath.(to_string (dest / (name ^ ".cmis.js"))))
+          in
+          ignore (Util.lines_of_process cmd);
+          let deps =
+            try
+              Findlib.package_deep_ancestors [ "byte"; "javascript" ]
+                [ findlib_pkg ]
+              |> List.filter_map (fun p ->
+                     try
+                       Some
+                         (Findlib.package_directory p
+                         ^ "/"
+                         ^ Findlib.package_property [ "byte"; "javascript" ] p
+                             "archive")
+                     with _ -> None)
+            with _ -> []
+          in
+          let js_files =
+            try
+              let is_sep c = Astring.Char.Ascii.is_white c || c = ',' in
+              List.map
+                (fun pkg ->
+                  try
+                    Findlib.package_property [ "byte"; "javascript" ] pkg
+                      "linkopts"
+                    |> Astring.String.fields ~empty:false ~is_sep
+                    |> List.filter (Astring.String.is_suffix ~affix:".js")
+                  with _ -> [])
+                (Findlib.package_deep_ancestors [ "byte"; "javascript" ]
+                   [ findlib_pkg ])
+              |> List.flatten |> List.sort_uniq compare
+            with _ -> []
+          in
+          let opam_packages =
+            List.filter_map
+              (fun cma_path ->
+                match
+                  List.find_opt
+                    (fun (_, contents) ->
+                      List.exists
+                        (fun p -> Fpath.(to_string (root // p)) = cma_path)
+                        contents)
+                    pkg_contents
+                with
+                | Some (pkg, _) -> Some (pkg, cma_path)
+                | None ->
+                    Format.eprintf "Failed to find package containing %s\n%!"
+                      cma_path;
+                    None)
+              deps
+          in
 
-      ) findlib_pkgs
-     ) pkg_contents
+          Util.write_file
+            Fpath.(dest / "top_worker_main.ml")
+            ([ "let () = Js_top_worker.Worker.run [" ]
+            @ List.map
+                (fun ((universe, name, version), cma_path) ->
+                  Format.sprintf
+                    "\"/assets/%s/%s/%s/%s.js\";\n\
+                     \"/assets/%s/%s/%s/%s.cmis.js\";"
+                    universe name version
+                    (Fpath.basename (Fpath.v cma_path))
+                    universe name version
+                    (Fpath.basename (Fpath.v cma_path)))
+                opam_packages
+            @ [ "]" ]);
+
+          let cmd =
+            Bos.Cmd.(
+              v "ocamlfind" % "ocamlc" % "-package" % "js_top_worker"
+              % Fpath.(to_string (dest / "top_worker_main.ml"))
+              % "-linkpkg" % "-o"
+              % Fpath.(to_string (dest / "top_worker_main.bc")))
+          in
+          ignore (Util.lines_of_process cmd);
+          let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel") in
+          let cmd =
+            List.fold_right
+              (fun a cmd -> Bos.Cmd.(cmd % a))
+              (js_files @ [ "+toplevel.js"; "+dynlink.js" ])
+              cmd
+          in
+          let cmd =
+            Bos.Cmd.(
+              cmd
+              % Fpath.(to_string (dest / "top_worker_main.bc"))
+              % "-o"
+              % Fpath.(
+                  to_string (dest / (Fpath.(basename cma_fpath) ^ ".worker.js"))))
+          in
+          ignore (Util.lines_of_process cmd))
+        findlib_pkgs)
+    pkg_contents
 
 let run _ (universes : (string * string) list) =
   let get_universe =
@@ -128,12 +222,17 @@ let run _ (universes : (string * string) list) =
   in
 
   let findlib_cmas =
-    List.filter_map (fun pkg ->
-      try
-        let archives = Findlib.package_property ["byte"; "javascript"] pkg "archive" in
-        let path = Findlib.package_directory pkg in
-        Some (Fpath.v (Printf.sprintf "%s/%s" path archives), pkg)
-      with _ -> None) (Findlib.list_packages' ()) in
+    List.filter_map
+      (fun pkg ->
+        try
+          let archives =
+            Findlib.package_property [ "byte"; "javascript" ] pkg "archive"
+          in
+          let path = Findlib.package_directory pkg in
+          Some (Fpath.v (Printf.sprintf "%s/%s" path archives), pkg)
+        with _ -> None)
+      (Findlib.list_packages' ())
+  in
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
     List.map
@@ -154,4 +253,3 @@ let run _ (universes : (string * string) list) =
       | None -> ())
     packages;
   do_jsoo root pkg_contents findlib_cmas
-  
