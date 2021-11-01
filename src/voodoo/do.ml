@@ -189,6 +189,7 @@ let run pkg_name is_blessed failed =
     Fpath.(Paths.link / "u" / universe / pkg_name / version)
   in
 
+  Js_toplevel.copy toplevel_files toplevel_dest;
   let error_log = Error_log.find package in
 
   let parent =
