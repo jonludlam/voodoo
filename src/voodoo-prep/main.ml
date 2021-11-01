@@ -93,7 +93,7 @@ let do_jsoo root pkg_contents findlib_cmas =
             Cmd.(
               jsoo
               % Fpath.(to_string (root // cma_fpath))
-              % "-o"
+              % "--pretty" % "-o"
               % Fpath.(to_string (dest / (name ^ ".js"))))
           in
           ignore (Util.lines_of_process cmd);
@@ -171,11 +171,11 @@ let do_jsoo root pkg_contents findlib_cmas =
             Bos.Cmd.(
               v "ocamlfind" % "ocamlc" % "-package" % "js_top_worker"
               % Fpath.(to_string (dest / "top_worker_main.ml"))
-              % "-linkpkg" % "-o"
+              % "-linkpkg" % "-linkall" % "-o"
               % Fpath.(to_string (dest / "top_worker_main.bc")))
           in
           ignore (Util.lines_of_process cmd);
-          let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel") in
+          let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
           let cmd =
             List.fold_right
               (fun a cmd -> Bos.Cmd.(cmd % a))
