@@ -184,6 +184,7 @@ let run pkg_name is_blessed failed =
   let package_mlds, otherdocs = Package_mlds.find package in
 
   let toplevel_files = Js_toplevel.find package in
+  Format.eprintf "Found %d toplevel files\n%!" (List.length toplevel_files);
   (* Toplevel files always go in /u/ *)
   let toplevel_dest =
     Fpath.(Paths.link / "u" / universe / pkg_name / version)
