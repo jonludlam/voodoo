@@ -174,6 +174,7 @@ let do_jsoo root pkg_contents findlib_cmas =
               % "-linkpkg" % "-linkall" % "-o"
               % Fpath.(to_string (dest / "top_worker_main.bc")))
           in
+          Format.eprintf "toplevel bc: %a\n%!" Bos.Cmd.pp cmd;
           ignore (Util.lines_of_process cmd);
           let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
           let cmd =
@@ -190,6 +191,7 @@ let do_jsoo root pkg_contents findlib_cmas =
               % Fpath.(
                   to_string (dest / (Fpath.(basename cma_fpath) ^ ".worker.js"))))
           in
+          Format.eprintf "toplevel js: %a\n%!" Bos.Cmd.pp cmd;
           ignore (Util.lines_of_process cmd))
         findlib_pkgs)
     pkg_contents
