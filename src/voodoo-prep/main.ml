@@ -103,36 +103,10 @@ let do_jsoo root pkg_contents findlib_cmas =
               % Fpath.(to_string (dest / (name ^ ".cmis.js"))))
           in
           ignore (Util.lines_of_process cmd);
-          let deps =
-            try
-              Findlib.package_deep_ancestors [ "byte"; "javascript" ]
-                [ findlib_pkg ]
-              |> List.filter_map (fun p ->
-                     try
-                       Some
-                         (Findlib.package_directory p
-                         ^ "/"
-                         ^ Findlib.package_property [ "byte"; "javascript" ] p
-                             "archive")
-                     with _ -> None)
-            with _ -> []
-          in
-          let js_files =
-            try
-              let is_sep c = Astring.Char.Ascii.is_white c || c = ',' in
-              List.map
-                (fun pkg ->
-                  try
-                    Findlib.package_property [ "byte"; "javascript" ] pkg
-                      "linkopts"
-                    |> Astring.String.fields ~empty:false ~is_sep
-                    |> List.filter (Astring.String.is_suffix ~affix:".js")
-                  with _ -> [])
-                (Findlib.package_deep_ancestors [ "byte"; "javascript" ]
-                   [ findlib_pkg ])
-              |> List.flatten |> List.sort_uniq compare
-            with _ -> []
-          in
+          let deps_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-a-format" % "-r" % findlib_pkg ) in
+          let deps = Util.lines_of_process deps_cmd in
+          let js_files_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-o-format" % "-r" % findlib_pkg) in
+          let js_files = Util.lines_of_process js_files_cmd in
           let opam_packages =
             List.filter_map
               (fun cma_path ->
@@ -222,18 +196,22 @@ let run _ (universes : (string * string) list) =
            match get_universe pkg with Some pkg -> pkg :: acc | None -> acc)
          []
   in
+  let findlib_pkgs =
+    Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "list") |> List.map (fun line -> Astring.String.fields line |> List.hd)
+  in
+  List.iter (fun i -> Format.eprintf "findlib_pkg: %s\n%!" i) findlib_pkgs;
 
   let findlib_cmas =
     List.filter_map
       (fun pkg ->
         try
-          let archives =
-            Findlib.package_property [ "byte"; "javascript" ] pkg "archive"
+          let cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-a-format" % pkg) in
+          let exec_answer =
+            Util.lines_of_process cmd |> List.hd
           in
-          let path = Findlib.package_directory pkg in
-          Some (Fpath.v (Printf.sprintf "%s/%s" path archives), pkg)
+          Some (Fpath.v exec_answer, pkg)
         with _ -> None)
-      (Findlib.list_packages' ())
+      findlib_pkgs
   in
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
