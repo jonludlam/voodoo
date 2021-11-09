@@ -85,7 +85,7 @@ let do_jsoo root pkg_contents findlib_cmas =
           cmas
       in
       let jsoo = Bos.Cmd.v "js_of_ocaml" in
-      let jsoo_mkcmis = Bos.Cmd.v "jsoo_mkcmis" in
+      let mk_func_name n = Astring.String.cuts ~sep:"." n |> String.concat "_dot_" in
       List.iter
         (fun (cma_fpath, findlib_pkg) ->
           let name = Fpath.basename cma_fpath in
@@ -93,16 +93,23 @@ let do_jsoo root pkg_contents findlib_cmas =
             Cmd.(
               jsoo
               % Fpath.(to_string (root // cma_fpath))
-              % "--pretty" % "-o"
+              % "--pretty" % "--wrap-with-fun" % (mk_func_name name) % "-o" 
               % Fpath.(to_string (dest / (name ^ ".js"))))
           in
           ignore (Util.lines_of_process cmd);
-          let cmd =
-            Cmd.(
-              jsoo_mkcmis % findlib_pkg % "-o"
-              % Fpath.(to_string (dest / (name ^ ".cmis.js"))))
-          in
-          ignore (Util.lines_of_process cmd);
+          Format.eprintf "lib jsoo: %a\n%!" Bos.Cmd.pp cmd;
+          let include_path_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-i-format" % "-r" % findlib_pkg) in
+          let include_path = Util.lines_of_process include_path_cmd in
+          let include_path = List.map (fun f ->
+            match Astring.String.fields f with
+            | ["-I"; path] -> path ^ "/"
+            | _ -> assert false) include_path in
+          Format.eprintf "Include paths: [%s]" (String.concat ";" include_path);
+          let cmis = List.filter_map (fun (pkg, contents) ->
+            let contents = List.filter (fun f ->
+              let dir, file = Fpath.split_base f in
+              Fpath.has_ext ".cmi" file && (List.mem Fpath.(to_string (root // dir)) include_path)) contents in
+            if List.length contents > 0 then Some (pkg, contents) else None) pkg_contents in
           let deps_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-a-format" % "-r" % findlib_pkg ) in
           let deps = Util.lines_of_process deps_cmd in
           let js_files_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-o-format" % "-r" % findlib_pkg) in
@@ -118,28 +125,42 @@ let do_jsoo root pkg_contents findlib_cmas =
                         contents)
                     pkg_contents
                 with
-                | Some (pkg, _) -> Some (pkg, cma_path)
+                | Some (pkg, _) ->
+                  let func_name = 
+                    mk_func_name (Fpath.basename (Fpath.v cma_path))
+                  in
+                  Some (pkg, cma_path, func_name)
                 | None ->
                     Format.eprintf "Failed to find package containing %s\n%!"
                       cma_path;
                     None)
               deps
           in
-
           Util.write_file
             Fpath.(dest / "top_worker_main.ml")
             ([ "let () = Js_top_worker.Worker.run [" ]
             @ List.map
-                (fun ((universe, name, version), cma_path) ->
+                (fun ((universe, name, version), cma_path, fname) ->
                   Format.sprintf
-                    "\"/assets/%s/%s/%s/%s.js\";\n\
-                     \"/assets/%s/%s/%s/%s.cmis.js\";"
+                    "\"/assets/%s/%s/%s/%s.js\"; (* %s *)"
                     universe name version
                     (Fpath.basename (Fpath.v cma_path))
-                    universe name version
-                    (Fpath.basename (Fpath.v cma_path)))
+                    fname)
                 opam_packages
-            @ [ "]" ]);
+            @ [ "] [" ]
+            @ List.flatten (List.map (fun ((universe,name,version), cmis) ->
+                  List.map (fun cmi ->
+                  Format.asprintf
+                    "\"/assets/%s/%s/%s/%a\";" universe name version Fpath.pp cmi) cmis) cmis)
+            @ [ "] [" ]
+            @ List.map
+                (fun (_, _, func_name) ->
+                  Format.sprintf
+                    "\"%s\";"
+                    func_name)
+                opam_packages
+            @ [ "]" ]
+            );
 
           let cmd =
             Bos.Cmd.(
