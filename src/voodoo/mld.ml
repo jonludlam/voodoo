@@ -35,17 +35,17 @@ let output_odocl mld =
 
 let rec compile mld =
   let () = Bos.OS.File.delete (output_file mld) |> Util.get_ok in
-    let extra_include, parent =
-      match mld.parent with
-      | None -> ([], None)
-      | Some parent ->
-          compile parent;
-          ([ compile_dir parent ], Some parent.name)
-    in
-    let includes = Fpath.Set.of_list extra_include in
-    ignore
-      (Odoc.compile ?parent ~output:(output_file mld) mld.path ~includes
-         ~children:mld.children)
+  let extra_include, parent =
+    match mld.parent with
+    | None -> ([], None)
+    | Some parent ->
+        compile parent;
+        ([ compile_dir parent ], Some parent.name)
+  in
+  let includes = Fpath.Set.of_list extra_include in
+  ignore
+    (Odoc.compile ?parent ~output:(output_file mld) mld.path ~includes
+       ~children:mld.children)
 
 let write mld contents =
   let oc = open_out Fpath.(to_string mld.path) in

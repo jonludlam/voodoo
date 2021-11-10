@@ -6,6 +6,28 @@ type actions = {
   objinfo : Fpath.t list;
 }
 
+let path_of_pkg =
+  let paths : (string, string) Hashtbl.t = Hashtbl.create 100 in
+  let findlib_dest =
+    lazy
+      (Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "printconf" % "destdir")
+      |> List.hd)
+  in
+  fun pkg ->
+    if Hashtbl.mem paths pkg then Hashtbl.find paths pkg
+    else
+      let pkg_path =
+        Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "query" % pkg) |> List.hd
+      in
+      let prefix = Lazy.force findlib_dest in
+      assert (Astring.String.is_prefix ~affix:prefix pkg_path);
+      let rel_path =
+        String.sub pkg_path (String.length prefix)
+          (String.length pkg_path - String.length prefix)
+      in
+      Hashtbl.replace paths pkg rel_path;
+      rel_path
+
 let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
  fun root package files ->
   let dest = Package.prep_path package in
@@ -36,9 +58,11 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
       && List.mem ext [ ".cmt"; ".cmti"; ".cmi" ]
       && not has_hyphen
     in
+    let is_cma = ext = ".cma" in
+    let is_js = ext = ".js" in
     let do_copy =
       (not in_build_dir)
-      && (is_in_doc_dir || is_module
+      && (is_in_doc_dir || is_module || is_cma || is_js
          || List.mem no_ext (List.map Fpath.v [ "META"; "dune-package" ]))
     in
     let is_cma = process_ocaml_artefacts && List.mem ext [ ".cma"; ".cmxa" ] in
@@ -57,7 +81,7 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     (fun (src, dst) ->
       let dir, _ = Fpath.split_base dst in
       Util.mkdir_p dir;
-      Util.cp (Fpath.to_string src) (Fpath.to_string dst))
+      Util.cp src dst)
     actions.copy;
   List.iter
     (fun fpath ->
@@ -69,10 +93,17 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     actions.objinfo
 
 let do_jsoo root pkg_contents findlib_cmas =
-  let open Bos in
+  let js_files_map =
+    List.map
+      (fun (pkg, files) ->
+        List.filter (Fpath.has_ext ".js") files
+        |> List.map (fun file -> (file, pkg)))
+      pkg_contents
+    |> List.flatten
+  in
+
   List.iter
     (fun (package, contents) ->
-      let dest = Package.prep_path package in
       let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
       let findlib_pkgs =
         List.filter_map
@@ -84,37 +115,85 @@ let do_jsoo root pkg_contents findlib_cmas =
               None)
           cmas
       in
-      let jsoo = Bos.Cmd.v "js_of_ocaml" in
-      let mk_func_name n = Astring.String.cuts ~sep:"." n |> String.concat "_dot_" in
       List.iter
         (fun (cma_fpath, findlib_pkg) ->
-          let name = Fpath.basename cma_fpath in
-          let cmd =
-            Cmd.(
-              jsoo
-              % Fpath.(to_string (root // cma_fpath))
-              % "--pretty" % "--wrap-with-fun" % (mk_func_name name) % "-o" 
-              % Fpath.(to_string (dest / (name ^ ".js"))))
+          let cma = Jsoo.Cma.{ cma_fpath; package } in
+          Jsoo.Cma.marshal cma;
+          let include_path_cmd =
+            Bos.Cmd.(
+              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              % "-i-format" % "-r" % findlib_pkg)
           in
-          ignore (Util.lines_of_process cmd);
-          Format.eprintf "lib jsoo: %a\n%!" Bos.Cmd.pp cmd;
-          let include_path_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-i-format" % "-r" % findlib_pkg) in
           let include_path = Util.lines_of_process include_path_cmd in
-          let include_path = List.map (fun f ->
-            match Astring.String.fields f with
-            | ["-I"; path] -> path ^ "/"
-            | _ -> assert false) include_path in
-          Format.eprintf "Include paths: [%s]" (String.concat ";" include_path);
-          let cmis = List.filter_map (fun (pkg, contents) ->
-            let contents = List.filter (fun f ->
-              let dir, file = Fpath.split_base f in
-              Fpath.has_ext ".cmi" file && (List.mem Fpath.(to_string (root // dir)) include_path)) contents in
-            if List.length contents > 0 then Some (pkg, contents) else None) pkg_contents in
-          let deps_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-a-format" % "-r" % findlib_pkg ) in
-          let deps = Util.lines_of_process deps_cmd in
-          let js_files_cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-o-format" % "-r" % findlib_pkg) in
+          let include_path =
+            List.map
+              (fun f ->
+                match Astring.String.fields f with
+                | [ "-I"; path ] -> path ^ "/"
+                | _ -> assert false)
+              include_path
+          in
+          Format.eprintf "Include paths: [%s]\n%!"
+            (String.concat ";" include_path);
+          let cmis =
+            List.concat
+              (List.map
+                 (fun (package, contents) ->
+                   List.filter_map
+                     (fun path ->
+                       let dir, file = Fpath.split_base path in
+                       if
+                         Fpath.has_ext ".cmi" file
+                         && List.mem
+                              Fpath.(to_string (root // dir))
+                              include_path
+                       then Some Jsoo.Cmi.{ package; path }
+                       else None)
+                     contents)
+                 pkg_contents)
+          in
+
+          let js_files_cmd =
+            Bos.Cmd.(
+              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              % "-o-format" % "-r" % findlib_pkg)
+          in
           let js_files = Util.lines_of_process js_files_cmd in
-          let opam_packages =
+          let js_files =
+            List.map
+              (fun s ->
+                let universe, pkg, version = package in
+                match s.[0] with
+                | '-' ->
+                    Format.eprintf "Ignoring jsoo option passed: %s\n%!" s;
+                    None
+                | '+' ->
+                    let fpath =
+                      String.sub s 1 (String.length s - 1) |> Fpath.v
+                    in
+                    let pkg =
+                      List.assoc Fpath.(v "lib" // fpath) js_files_map
+                    in
+                    Some Fpath.(Package.prep_path pkg / "lib" // fpath)
+                | _ ->
+                    Format.eprintf "Bad js file for: (%s,%s,%s) (%s)\n%!"
+                      universe pkg version s;
+                    failwith "Bad package")
+              js_files
+          in
+          let js_files =
+            List.fold_right
+              (fun f acc -> match f with Some x -> x :: acc | None -> acc)
+              js_files []
+          in
+
+          let deps_cmd =
+            Bos.Cmd.(
+              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              % "-a-format" % "-r" % findlib_pkg)
+          in
+          let deps = Util.lines_of_process deps_cmd in
+          let dep_cmas =
             List.filter_map
               (fun cma_path ->
                 match
@@ -126,68 +205,22 @@ let do_jsoo root pkg_contents findlib_cmas =
                     pkg_contents
                 with
                 | Some (pkg, _) ->
-                  let func_name = 
-                    mk_func_name (Fpath.basename (Fpath.v cma_path))
-                  in
-                  Some (pkg, cma_path, func_name)
+                    let cma =
+                      { Jsoo.Cma.package = pkg; cma_fpath = Fpath.v cma_path }
+                    in
+                    Some cma
                 | None ->
                     Format.eprintf "Failed to find package containing %s\n%!"
                       cma_path;
                     None)
               deps
           in
-          Util.write_file
-            Fpath.(dest / "top_worker_main.ml")
-            ([ "let () = Js_top_worker.Worker.run [" ]
-            @ List.map
-                (fun ((universe, name, version), cma_path, fname) ->
-                  Format.sprintf
-                    "\"/assets/%s/%s/%s/%s.js\"; (* %s *)"
-                    universe name version
-                    (Fpath.basename (Fpath.v cma_path))
-                    fname)
-                opam_packages
-            @ [ "] [" ]
-            @ List.flatten (List.map (fun ((universe,name,version), cmis) ->
-                  List.map (fun cmi ->
-                  Format.asprintf
-                    "\"/assets/%s/%s/%s/%a\";" universe name version Fpath.pp cmi) cmis) cmis)
-            @ [ "] [" ]
-            @ List.map
-                (fun (_, _, func_name) ->
-                  Format.sprintf
-                    "\"%s\";"
-                    func_name)
-                opam_packages
-            @ [ "]" ]
-            );
 
-          let cmd =
-            Bos.Cmd.(
-              v "ocamlfind" % "ocamlc" % "-package" % "js_top_worker"
-              % Fpath.(to_string (dest / "top_worker_main.ml"))
-              % "-linkpkg" % "-linkall" % "-o"
-              % Fpath.(to_string (dest / "top_worker_main.bc")))
+          let toplevel =
+            Jsoo.Toplevel.{ package; cma_fpath; js_files; dep_cmas; cmis }
           in
-          Format.eprintf "toplevel bc: %a\n%!" Bos.Cmd.pp cmd;
-          ignore (Util.lines_of_process cmd);
-          let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
-          let cmd =
-            List.fold_right
-              (fun a cmd -> Bos.Cmd.(cmd % a))
-              (js_files @ [ "+toplevel.js"; "+dynlink.js" ])
-              cmd
-          in
-          let cmd =
-            Bos.Cmd.(
-              cmd
-              % Fpath.(to_string (dest / "top_worker_main.bc"))
-              % "-o"
-              % Fpath.(
-                  to_string (dest / (Fpath.(basename cma_fpath) ^ ".worker.js"))))
-          in
-          Format.eprintf "toplevel js: %a\n%!" Bos.Cmd.pp cmd;
-          ignore (Util.lines_of_process cmd))
+          Jsoo.Toplevel.build_toplevel toplevel;
+          Jsoo.Toplevel.marshal toplevel)
         findlib_pkgs)
     pkg_contents
 
@@ -218,7 +251,8 @@ let run _ (universes : (string * string) list) =
          []
   in
   let findlib_pkgs =
-    Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "list") |> List.map (fun line -> Astring.String.fields line |> List.hd)
+    Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "list")
+    |> List.map (fun line -> Astring.String.fields line |> List.hd)
   in
   List.iter (fun i -> Format.eprintf "findlib_pkg: %s\n%!" i) findlib_pkgs;
 
@@ -226,10 +260,12 @@ let run _ (universes : (string * string) list) =
     List.filter_map
       (fun pkg ->
         try
-          let cmd = Bos.Cmd.(v "ocamlfind" % "query" % "-predicates" % "byte,javascript" % "-a-format" % pkg) in
-          let exec_answer =
-            Util.lines_of_process cmd |> List.hd
+          let cmd =
+            Bos.Cmd.(
+              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              % "-a-format" % pkg)
           in
+          let exec_answer = Util.lines_of_process cmd |> List.hd in
           Some (Fpath.v exec_answer, pkg)
         with _ -> None)
       findlib_pkgs
