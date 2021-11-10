@@ -107,6 +107,8 @@ module Toplevel = struct
 
   let bc_exe_path vv = Fpath.(Package.prep_path vv.package / bc_exe_name vv)
 
+  let js_dest_path vv = Fpath.(Package.prep_path vv.package / "voodoo_js_files")
+
   let marshal v =
     let path = meta_path v in
     let oc = open_out_bin (Fpath.to_string path) in
@@ -145,12 +147,20 @@ module Toplevel = struct
     Format.eprintf "toplevel bc: %a\n%!" Bos.Cmd.pp cmd;
     ignore (Util.lines_of_process cmd)
 
+  let copy_js_files vv =
+    let dest_path = js_dest_path vv in
+    Util.mkdir_p dest_path;
+    List.iter (fun js ->
+      let dest = Fpath.(dest_path / basename js) in
+      Util.cp js dest) vv.js_files
+
   let cmd (vv : t) =
     let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
+    let js f = Fpath.(js_dest_path vv / Fpath.basename f |> to_string) in
     let cmd =
       List.fold_right
         (fun a cmd -> Bos.Cmd.(cmd % a))
-        (List.map Fpath.to_string vv.js_files
+        (List.map js vv.js_files
         @ [ "+toplevel.js"; "+dynlink.js" ])
         cmd
     in

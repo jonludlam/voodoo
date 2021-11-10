@@ -167,14 +167,19 @@ let do_jsoo root pkg_contents findlib_cmas =
                 | '-' ->
                     Format.eprintf "Ignoring jsoo option passed: %s\n%!" s;
                     None
-                | '+' ->
+                | '+' -> begin
                     let fpath =
                       String.sub s 1 (String.length s - 1) |> Fpath.v
                     in
-                    let pkg =
-                      List.assoc Fpath.(v "lib" // fpath) js_files_map
-                    in
-                    Some Fpath.(Package.prep_path pkg / "lib" // fpath)
+                    try
+                      let pkg =
+                        List.assoc Fpath.(v "lib" // fpath) js_files_map
+                      in
+                      Some Fpath.(Package.prep_path pkg / "lib" // fpath)
+                    with Not_found ->
+                      Format.eprintf "Failed to find js file: %s\n%!" s;
+                      exit 1
+                    end
                 | _ ->
                     Format.eprintf "Bad js file for: (%s,%s,%s) (%s)\n%!"
                       universe pkg version s;
