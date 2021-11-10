@@ -151,7 +151,7 @@ module Toplevel = struct
     let dest_path = js_dest_path vv in
     Util.mkdir_p dest_path;
     List.iter (fun js ->
-      let src = Fpath.(root // js) in
+      let src = Fpath.(root // v "lib" // js) in
       let dst = Fpath.(dest_path // js) in
       let (dir, _) = Fpath.split_base dst in
       Util.mkdir_p dir;
