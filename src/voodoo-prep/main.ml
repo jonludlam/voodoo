@@ -93,15 +93,6 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     actions.objinfo
 
 let do_jsoo root pkg_contents findlib_cmas =
-  let js_files_map =
-    List.map
-      (fun (pkg, files) ->
-        List.filter (Fpath.has_ext ".js") files
-        |> List.map (fun file -> (file, pkg)))
-      pkg_contents
-    |> List.flatten
-  in
-
   List.iter
     (fun (package, contents) ->
       let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
@@ -167,19 +158,8 @@ let do_jsoo root pkg_contents findlib_cmas =
                 | '-' ->
                     Format.eprintf "Ignoring jsoo option passed: %s\n%!" s;
                     None
-                | '+' -> begin
-                    let fpath =
-                      String.sub s 1 (String.length s - 1) |> Fpath.v
-                    in
-                    try
-                      let pkg =
-                        List.assoc Fpath.(v "lib" // fpath) js_files_map
-                      in
-                      Some Fpath.(Package.prep_path pkg / "lib" // fpath)
-                    with Not_found ->
-                      Format.eprintf "Failed to find js file: %s\n%!" s;
-                      exit 1
-                    end
+                | '+' -> 
+                    Some (String.sub s 1 (String.length s - 1) |> Fpath.v)
                 | _ ->
                     Format.eprintf "Bad js file for: (%s,%s,%s) (%s)\n%!"
                       universe pkg version s;
@@ -225,6 +205,7 @@ let do_jsoo root pkg_contents findlib_cmas =
             Jsoo.Toplevel.{ package; cma_fpath; js_files; dep_cmas; cmis }
           in
           Jsoo.Toplevel.build_toplevel toplevel;
+          Jsoo.Toplevel.copy_js_files root toplevel;
           Jsoo.Toplevel.marshal toplevel)
         findlib_pkgs)
     pkg_contents

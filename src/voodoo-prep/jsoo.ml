@@ -147,16 +147,19 @@ module Toplevel = struct
     Format.eprintf "toplevel bc: %a\n%!" Bos.Cmd.pp cmd;
     ignore (Util.lines_of_process cmd)
 
-  let copy_js_files vv =
+  let copy_js_files root vv =
     let dest_path = js_dest_path vv in
     Util.mkdir_p dest_path;
     List.iter (fun js ->
-      let dest = Fpath.(dest_path / basename js) in
-      Util.cp js dest) vv.js_files
+      let src = Fpath.(root // js) in
+      let dst = Fpath.(dest_path // js) in
+      let (dir, _) = Fpath.split_base dst in
+      Util.mkdir_p dir;
+      Util.cp src dst) vv.js_files
 
   let cmd (vv : t) =
     let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
-    let js f = Fpath.(js_dest_path vv / Fpath.basename f |> to_string) in
+    let js f = Fpath.(js_dest_path vv // f |> to_string) in
     let cmd =
       List.fold_right
         (fun a cmd -> Bos.Cmd.(cmd % a))
