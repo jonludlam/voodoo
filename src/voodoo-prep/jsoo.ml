@@ -188,9 +188,15 @@ let handle_toplevel toplevel_fpath =
   let cmd = Toplevel.cmd toplevel in
   let dir = fst (Fpath.split_base (Toplevel.output_path toplevel)) in
   Util.mkdir_p dir;
-  Format.printf "Cma: %a\n%!" Bos.Cmd.pp cmd;
-  ignore @@ Util.lines_of_process cmd;
-  Some toplevel
+  Format.printf "Toplevel: %a\n%!" Bos.Cmd.pp cmd;
+  try
+    ignore @@ Util.lines_of_process cmd;
+    Some toplevel
+  with e ->
+    Format.eprintf "Caught failure building js toplevel: %s\n%!" (Printexc.to_string e);
+    let lines = Util.lines_of_process Bos.Cmd.(v "ls" % "-lR") in
+    List.iter (fun line -> Format.eprintf "> %s\n%!" line) lines;
+    exit 1
 
 let run path package =
   match
