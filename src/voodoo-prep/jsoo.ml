@@ -1,3 +1,5 @@
+module StringSet = Set.Make(String)
+
 module Cma = struct
   type t = { cma_fpath : Fpath.t; package : Package.t }
 
@@ -61,7 +63,10 @@ module Cmi = struct
     let s2 = Format.asprintf "%a" pp v2 in
     String.compare s1 s2
 
-  let copy cmis =
+  let copy universes cmis =
+    let cmis = List.filter (fun cmi ->
+      let (uid, _, _) = cmi.package in
+      StringSet.mem uid universes) cmis in
     let l = List.map (fun cmi -> (prep_path cmi, output_path cmi)) cmis in
     let dst_dirs =
       List.map
@@ -204,14 +209,21 @@ let handle_toplevel toplevel_fpath =
 let run path package =
   match
     Bos.OS.Dir.fold_contents
-      (fun fpath acc ->
+      (fun fpath (acc,universes) ->
         let rel_fpath =
           match Fpath.relativize ~root:path fpath with
           | Some x -> x
           | None -> failwith "Bos error"
         in
+
+        let segs = Fpath.segs rel_fpath in
+        let universes = match segs with
+        | "universes" :: universe_id :: _ ->
+          StringSet.add universe_id universes
+        | _ -> universes in 
+
         let path_relevant =
-          match (package, Fpath.segs rel_fpath) with
+          match (package, segs) with
           | Some s, "universes" :: _universe_id :: package' :: _ -> package' = s
           | Some _, _ -> false
           | None, _ -> true
@@ -220,11 +232,11 @@ let run path package =
         if
           path_relevant
           && List.mem (Fpath.get_ext fpath) [ Cma.ext; Toplevel.meta_ext ]
-        then fpath :: acc
-        else acc)
-      [] path
+        then (fpath :: acc, universes)
+        else (acc, universes))
+      ([], StringSet.empty) path
   with
-  | Ok files ->
+  | Ok (files, universes) ->
       let toplevels =
         List.filter_map
           (fun x ->
@@ -236,7 +248,7 @@ let run path package =
           (List.map (fun toplevel -> toplevel.Toplevel.cmis) toplevels)
       in
       let cmis = List.sort_uniq Cmi.compare cmis in
-      Cmi.copy cmis
+      Cmi.copy universes cmis
   | Error (`Msg m) ->
       Format.eprintf "Error while scanning: %s\n%!" m;
       exit 1
