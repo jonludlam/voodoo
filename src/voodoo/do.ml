@@ -270,6 +270,7 @@ let run pkg_name is_blessed failed =
   in
   if failed then
     Bos.OS.File.write Fpath.(output_path / "failed") "failed" |> Util.get_ok;
+  Bos.OS.File.write Fpath.(output_path / "universe.txt") universe |> Util.get_ok;
   ()
 
 let run_all () =
