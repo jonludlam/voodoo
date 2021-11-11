@@ -25,7 +25,7 @@
  (name voodoo-prep)
  (synopsis "Voodoo prep")
  (description "Voodoo prep")
- (depends cmdliner fpath bos opam-format))
+ (depends cmdliner fpath bos opam-format yojson))
 
 (package
  (name voodoo-do)
