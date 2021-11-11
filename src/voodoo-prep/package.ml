@@ -15,3 +15,8 @@ let prep_path = path Paths.prep
 let jsoo_path = path Paths.jsoo
 
 let pp fmt ((u, n, v) : t) = Format.fprintf fmt "(%s,%s,%s)" u n v
+
+let compare x y =
+  let xs = Format.asprintf "%a" pp x in
+  let ys = Format.asprintf "%a" pp y in
+  String.compare xs ys
