@@ -23,7 +23,7 @@ module Cma = struct
   let output_path vv =
     Fpath.(Package.jsoo_path vv.package // add_ext ".js" (v (name vv)))
 
-  let server_path vv = Fpath.(v "/assets" // output_path vv)
+  let server_path vv = Fpath.(v "/toplevels" // output_path vv)
 
   let marshal v =
     let path = meta_path v in
@@ -52,7 +52,7 @@ module Cmi = struct
 
   let output_path vv = Fpath.(Package.jsoo_path vv.package // vv.path)
 
-  let server_path vv = Fpath.(v "/assets" // output_path vv)
+  let server_path vv = Fpath.(v "/toplevels" // output_path vv)
 
   let pp fmt v =
     Format.fprintf fmt "{ package: %a; path: %a }" Package.pp v.package Fpath.pp
