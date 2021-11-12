@@ -193,7 +193,7 @@ let handle_cma cma_fpath =
 
 let handle_toplevel toplevel_fpath =
   let toplevel = Toplevel.unmarshal (Fpath.to_string toplevel_fpath) in
-  (* let cmd = Toplevel.cmd toplevel in
+  let cmd = Toplevel.cmd toplevel in
   let dir = fst (Fpath.split_base (Toplevel.output_path toplevel)) in
   Util.mkdir_p dir;
   Format.printf "Toplevel: %a\n%!" Bos.Cmd.pp cmd;
@@ -204,8 +204,7 @@ let handle_toplevel toplevel_fpath =
     Format.eprintf "Caught failure building js toplevel: %s\n%!" (Printexc.to_string e);
     let lines = Util.lines_of_process Bos.Cmd.(v "ls" % "-lR") in
     List.iter (fun line -> Format.eprintf "> %s\n%!" line) lines;
-    exit 1 *)
-  Some toplevel
+    exit 1
 
 let run path package =
   match
@@ -241,7 +240,7 @@ let run path package =
       let toplevels =
         List.filter_map
           (fun x ->
-            if Fpath.has_ext Cma.ext x then (*handle_cma x*) None else handle_toplevel x)
+            if Fpath.has_ext Cma.ext x then handle_cma x else handle_toplevel x)
           files
       in
       let cmis =
