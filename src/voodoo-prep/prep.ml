@@ -22,9 +22,9 @@ module Prep = struct
       & opt (some string) None
       & info [ "s"; "switch" ] ~doc ~docv:"SWITCH")
 
-  let prep lib_dir switch universes =
+  let prep lib_dir switch universes extra_universes =
     Opam.switch := switch;
-    Main.run lib_dir universes
+    Main.run lib_dir universes extra_universes
 
   let lib_dir =
     let doc =
@@ -42,7 +42,14 @@ module Prep = struct
       & opt (list (pair ~sep:':' string string)) []
       & info [ "u"; "universes" ] ~doc)
 
-  let cmd = Term.(const prep $ lib_dir $ switch $ universes)
+  let extra_universes =
+    let doc = "Provide extra universes as 'package=universe id' couples. These will not be prepped but can be referenced by jsoo toplevels." in
+    Arg.(
+      value
+      & opt (list (pair ~sep:':' string string)) []
+      & info [ "v"; "extra-universes" ] ~doc)
+    
+  let cmd = Term.(const prep $ lib_dir $ switch $ universes $ extra_universes)
 
   let info = Term.info "prep" ~doc:"Prep a directory tree for compiling"
 end

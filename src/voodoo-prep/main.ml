@@ -94,8 +94,8 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
 
 let do_jsoo root pkg_contents findlib_cmas =
   List.iter
-    (fun (package, contents) ->
-      let cmas = List.filter (fun p -> Fpath.has_ext ".cma" p) contents in
+    (fun (package, ty, contents) ->
+      let cmas = if ty = `Prep then List.filter (fun p -> Fpath.has_ext ".cma" p) contents else [] in
       let findlib_pkgs =
         List.filter_map
           (fun p ->
@@ -129,7 +129,7 @@ let do_jsoo root pkg_contents findlib_cmas =
           let cmis =
             List.concat
               (List.map
-                 (fun (package, contents) ->
+                 (fun (package, _, contents) ->
                    List.filter_map
                      (fun path ->
                        let dir, file = Fpath.split_base path in
@@ -183,13 +183,13 @@ let do_jsoo root pkg_contents findlib_cmas =
               (fun cma_path ->
                 match
                   List.find_opt
-                    (fun (_, contents) ->
+                    (fun (_, _, contents) ->
                       List.exists
                         (fun p -> Fpath.(to_string (root // p)) = cma_path)
                         contents)
                     pkg_contents
                 with
-                | Some (pkg, _) ->
+                | Some (pkg, _, _) ->
                     let cma =
                       { Jsoo.Cma.package = pkg; cma_fpath = Fpath.v cma_path }
                     in
@@ -210,7 +210,8 @@ let do_jsoo root pkg_contents findlib_cmas =
         findlib_pkgs)
     pkg_contents
 
-let run _ (universes : (string * string) list) =
+type pkg_kind = [ `Prep | `Reference ]
+let run _ (universes : (string * string) list) (extra_universes : (string * string) list) =
   let get_universe =
     match universes with
     | [] ->
@@ -222,11 +223,14 @@ let run _ (universes : (string * string) list) =
         fun pkg ->
           let universe = string_of_int !id in
           incr id;
-          Some (universe, pkg.Opam.name, pkg.version)
+          Some ((universe, pkg.Opam.name, pkg.version), `Prep)
     | _ -> (
         fun pkg ->
-          try Some (List.assoc pkg.Opam.name universes, pkg.name, pkg.version)
-          with _ -> None)
+          try Some ((List.assoc pkg.Opam.name universes, pkg.name, pkg.version), `Prep)
+          with Not_found -> (try
+            Some ((List.assoc pkg.Opam.name extra_universes, pkg.name, pkg.version), `Reference)
+          with Not_found ->
+            None))
   in
 
   let packages =
@@ -259,20 +263,22 @@ let run _ (universes : (string * string) list) =
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
     List.map
-      (fun ((_, pkg_name, _) as package) ->
-        (package, Opam.pkg_contents pkg_name))
+      (fun ((_, pkg_name, _) as package, ty) ->
+        (package, ty, Opam.pkg_contents pkg_name))
       packages
   in
   List.iter
-    (fun (package, files) -> process_package root package files)
+    (fun (package, ty, files) ->
+      if ty=`Prep then process_package root package files)
     pkg_contents;
   List.iter
-    (fun package ->
+    (fun (package, ty) ->
       let _, name, version = package in
-      match Opam.opam_file name version with
-      | Some lines ->
+      match Opam.opam_file name version, ty with
+      | Some lines, `Prep ->
           let dest = Package.prep_path package in
           Util.write_file Fpath.(dest / "opam") lines
-      | None -> ())
+      | _, _ -> ())
     packages;
+
   do_jsoo root pkg_contents findlib_cmas
