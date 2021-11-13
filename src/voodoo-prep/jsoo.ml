@@ -87,6 +87,7 @@ module Toplevel = struct
     dep_cmas : Cma.t list;
     cmis : Cmi.t list;
     js_files : Fpath.t list;
+    digest : Digest.t option;
   }
 
   let meta_ext = ".jstop"
@@ -114,6 +115,11 @@ module Toplevel = struct
 
   let js_dest_path vv = Fpath.(Package.prep_path vv.package / "voodoo_js_files")
 
+  let digested_path vv =
+    match vv.digest with
+    | Some digest -> Fpath.(Paths.jsoo / "toplevel-by-digest" / digest / "toplevel.js")
+    | None -> failwith "No digest"
+
   let marshal v =
     let path = meta_path v in
     let oc = open_out_bin (Fpath.to_string path) in
@@ -126,17 +132,8 @@ module Toplevel = struct
     close_in ic;
     result
 
-  let toplevel_ml v =
-    let q s = "\"" ^ s ^ "\";" in
-    [ "let () = Js_top_worker.Worker.run [" ]
-    @ List.map
-        (fun cma -> Cma.server_path cma |> Fpath.to_string |> q)
-        v.dep_cmas
-    @ [ "] [" ]
-    @ List.map (fun cmi -> Cmi.server_path cmi |> Fpath.to_string |> q) v.cmis
-    @ [ "] [" ]
-    @ List.map (fun cma -> q (Cma.func_name cma)) v.dep_cmas
-    @ [ "]" ]
+  let toplevel_ml _ =
+    [ "let () = Js_top_worker.Worker.run ()" ]
 
   let build_toplevel vv =
     let path = Fpath.(Package.prep_path vv.package / "top_worker_main.ml") in
@@ -199,13 +196,27 @@ let handle_toplevel toplevel_fpath =
   Format.printf "Toplevel: %a\n%!" Bos.Cmd.pp cmd;
   try
     ignore @@ Util.lines_of_process cmd;
-    Some toplevel
+    let digest = Some (Digest.file (Fpath.to_string @@ Toplevel.output_path toplevel) |> Digest.to_hex) in
+    let toplevel = { toplevel with digest } in
+    let digested_dir, _ = Fpath.split_base (Toplevel.digested_path toplevel) in
+    Util.mkdir_p digested_dir;
+    Util.mv (Toplevel.output_path toplevel) (Toplevel.digested_path toplevel);
+    Some { toplevel with digest }
   with e ->
     Format.eprintf "Caught failure building js toplevel: %s\n%!" (Printexc.to_string e);
     let lines = Util.lines_of_process Bos.Cmd.(v "ls" % "-lR") in
     List.iter (fun line -> Format.eprintf "> %s\n%!" line) lines;
     exit 1
 
+type config = {
+  package : string;
+  cma : string;
+  dep_cmas : (string * string) list;
+  cmis : string list;
+  digest : string
+} [@@deriving yojson]
+
+type config_list = config list [@@deriving yojson]
 let run path package =
   match
     Bos.OS.Dir.fold_contents
@@ -251,21 +262,24 @@ let run path package =
       Cmi.copy universes cmis;
       (* Output json like:
       [ 
-        ["base", "base.cma.worker.js"],
-        ["base.base_internalhash_types", "base_internalhash_types.cma.worker.js"],
+        { "package": "base",
+          "cma": "base.cma.worker.js",
+          "dep_cmas": [ [ "/jsoo/universes/abcde/sexplib0/sexplib0.cma.js", "sexplib_dot_cma" ] ],
+          "cmis": [ ... ]
         ...
       ]
       *)
       let packages = List.map (fun t -> t.Toplevel.package) toplevels |> List.sort_uniq Package.compare in
       List.iter (fun package ->
         let pkg_toplevels = List.filter (fun t -> t.Toplevel.package = package) toplevels in
-        let toplevel_json : Yojson.Safe.t =
-          `List (List.map (fun t ->
-            let name = Fpath.basename t.Toplevel.cma_fpath in
-            `List [
-              `String name; `String (Toplevel.js_name t)
-            ]) pkg_toplevels)
-        in
+        let toplevels = List.map (fun t ->
+          let name = Fpath.basename t.Toplevel.cma_fpath in
+          { package = name;
+            cma = Toplevel.js_name t;
+            dep_cmas = List.map (fun cma -> (Cma.server_path cma |> Fpath.to_string, Cma.func_name cma)) t.dep_cmas;
+            cmis = List.map (fun cmi -> Cmi.server_path cmi |> Fpath.to_string) t.cmis;
+            digest = match t.digest with | Some d -> d | None -> failwith "No digest" }) pkg_toplevels in
+        let toplevel_json = config_list_to_yojson toplevels in 
         Util.write_file Fpath.(Package.jsoo_path package / "toplevels.json")
           [Yojson.Safe.to_string toplevel_json ]) packages
   | Error (`Msg m) ->

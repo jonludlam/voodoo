@@ -57,3 +57,10 @@ let cp src dst =
   assert (
     lines_of_process Cmd.(v "cp" % Fpath.to_string src % Fpath.to_string dst)
     = [])
+
+    let mv src dst =
+      Format.eprintf "%a :-> %a\n%!" Fpath.pp src Fpath.pp dst;
+      assert (
+        lines_of_process Cmd.(v "mv" % Fpath.to_string src % Fpath.to_string dst)
+        = [])
+    

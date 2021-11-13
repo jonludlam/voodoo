@@ -202,7 +202,7 @@ let do_jsoo root pkg_contents findlib_cmas =
           in
 
           let toplevel =
-            Jsoo.Toplevel.{ package; cma_fpath; js_files; dep_cmas; cmis }
+            Jsoo.Toplevel.{ package; cma_fpath; js_files; dep_cmas; cmis; digest=None }
           in
           Jsoo.Toplevel.build_toplevel toplevel;
           Jsoo.Toplevel.copy_js_files root toplevel;

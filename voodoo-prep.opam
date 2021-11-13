@@ -15,6 +15,7 @@ depends: [
   "bos"
   "opam-format"
   "yojson"
+  "ppx_deriving_yojson"
   "odoc" {with-doc}
 ]
 build: [

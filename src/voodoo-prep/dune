@@ -2,4 +2,5 @@
  (name prep)
  (public_name voodoo-prep)
  (package voodoo-prep)
+ (preprocess (pps ppx_deriving_yojson))
  (libraries cmdliner fpath bos opam-format findlib yojson))
