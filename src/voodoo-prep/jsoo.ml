@@ -160,7 +160,7 @@ module Toplevel = struct
       Util.cp src dst) vv.js_files
 
   let cmd (vv : t) =
-    let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty") in
+    let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty" % "--no-cmis") in
     let js f = Fpath.(js_dest_path vv // f |> to_string) in
     let cmd =
       List.fold_right
