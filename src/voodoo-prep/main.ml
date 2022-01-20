@@ -10,14 +10,14 @@ let path_of_pkg =
   let paths : (string, string) Hashtbl.t = Hashtbl.create 100 in
   let findlib_dest =
     lazy
-      (Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "printconf" % "destdir")
+      (Util.lines_of_process Bos.Cmd.(v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "printconf" % "destdir")
       |> List.hd)
   in
   fun pkg ->
     if Hashtbl.mem paths pkg then Hashtbl.find paths pkg
     else
       let pkg_path =
-        Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "query" % pkg) |> List.hd
+        Util.lines_of_process Bos.Cmd.(v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "query" % pkg) |> List.hd
       in
       let prefix = Lazy.force findlib_dest in
       assert (Astring.String.is_prefix ~affix:prefix pkg_path);
@@ -92,7 +92,7 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
       Util.write_file Fpath.(dest // set_ext "ocamlobjinfo" fpath) lines)
     actions.objinfo
 
-let do_jsoo root pkg_contents findlib_cmas =
+let do_jsoo root pkg_contents findlib_cmas stdlib_cmis =
   List.iter
     (fun (package, ty, contents) ->
       let cmas =
@@ -116,7 +116,7 @@ let do_jsoo root pkg_contents findlib_cmas =
           Jsoo.Cma.marshal cma;
           let include_path_cmd =
             Bos.Cmd.(
-              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "query" % "-predicates" % "byte,javascript"
               % "-i-format" % "-r" % findlib_pkg)
           in
           let include_path = Util.lines_of_process include_path_cmd in
@@ -128,9 +128,6 @@ let do_jsoo root pkg_contents findlib_cmas =
                 | _ -> assert false)
               include_path
           in
-          let stdlib_cmd = Bos.Cmd.(v "ocamlfind" % "printconf" % "stdlib") in
-          let stdlib = Util.lines_of_process stdlib_cmd in
-          let include_path = include_path @ stdlib in
           Format.eprintf "Include paths: [%s]\n%!"
             (String.concat ";" include_path);
           let cmis =
@@ -150,10 +147,11 @@ let do_jsoo root pkg_contents findlib_cmas =
                      contents)
                  pkg_contents)
           in
+          let cmis = cmis @ stdlib_cmis in
 
           let js_files_cmd =
             Bos.Cmd.(
-              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "query" % "-predicates" % "byte,javascript"
               % "-o-format" % "-r" % findlib_pkg)
           in
           let js_files = Util.lines_of_process js_files_cmd in
@@ -180,7 +178,7 @@ let do_jsoo root pkg_contents findlib_cmas =
 
           let deps_cmd =
             Bos.Cmd.(
-              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "query" % "-predicates" % "byte,javascript"
               % "-a-format" % "-r" % findlib_pkg)
           in
           let deps = Util.lines_of_process deps_cmd in
@@ -257,7 +255,7 @@ let run _ (universes : (string * string) list)
          []
   in
   let findlib_pkgs =
-    Util.lines_of_process Bos.Cmd.(v "ocamlfind" % "list")
+    Util.lines_of_process Bos.Cmd.(v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "list")
     |> List.map (fun line -> Astring.String.fields line |> List.hd)
   in
   List.iter (fun i -> Format.eprintf "findlib_pkg: %s\n%!" i) findlib_pkgs;
@@ -268,7 +266,7 @@ let run _ (universes : (string * string) list)
         try
           let cmd =
             Bos.Cmd.(
-              v "ocamlfind" % "query" % "-predicates" % "byte,javascript"
+              v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "query" % "-predicates" % "byte,javascript"
               % "-a-format" % pkg)
           in
           let exec_answer = Util.lines_of_process cmd |> List.hd in
@@ -276,6 +274,25 @@ let run _ (universes : (string * string) list)
         with _ -> None)
       findlib_pkgs
   in
+  let stdlib_cmd = Bos.Cmd.(v "opam" % "exec" % ("--switch="^Opam.get_switch()) % "--" % "ocamlfind" % "printconf" % "stdlib") in
+  let stdlib = Util.lines_of_process stdlib_cmd |> List.hd in
+  let opam_prefix = Opam.prefix () |> Fpath.v in
+  let stdlib_cmis =
+    match Bos.OS.Dir.fold_contents
+    (fun path acc ->
+      if Fpath.has_ext "cmi" path then
+        match Fpath.relativize ~root:opam_prefix path
+      with | Some p -> p::acc
+    | None -> acc else acc) [] Fpath.(v stdlib) with
+    | Ok cmis -> cmis
+    | Error (`Msg m) ->
+      failwith m
+  in
+  let stdlib_pkg =
+    let pkg,_ = List.find (fun ((_,n,_),_) -> n="ocaml-base-compiler") packages in
+    pkg
+  in
+  let stdlib_cmis = List.map (fun cmi -> Jsoo.Cmi.{ package=stdlib_pkg; path=cmi }) stdlib_cmis in
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
     List.map
@@ -297,4 +314,4 @@ let run _ (universes : (string * string) list)
       | _, _ -> ())
     packages;
 
-  do_jsoo root pkg_contents findlib_cmas
+  do_jsoo root pkg_contents findlib_cmas stdlib_cmis
