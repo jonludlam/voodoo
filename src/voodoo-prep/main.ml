@@ -95,7 +95,11 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
 let do_jsoo root pkg_contents findlib_cmas =
   List.iter
     (fun (package, ty, contents) ->
-      let cmas = if ty = `Prep then List.filter (fun p -> Fpath.has_ext ".cma" p) contents else [] in
+      let cmas =
+        if ty = `Prep then
+          List.filter (fun p -> Fpath.has_ext ".cma" p) contents
+        else []
+      in
       let findlib_pkgs =
         List.filter_map
           (fun p ->
@@ -124,6 +128,9 @@ let do_jsoo root pkg_contents findlib_cmas =
                 | _ -> assert false)
               include_path
           in
+          let stdlib_cmd = Bos.Cmd.(v "ocamlfind" % "printconf" % "stdlib") in
+          let stdlib = Util.lines_of_process stdlib_cmd in
+          let include_path = include_path @ stdlib in
           Format.eprintf "Include paths: [%s]\n%!"
             (String.concat ";" include_path);
           let cmis =
@@ -158,8 +165,7 @@ let do_jsoo root pkg_contents findlib_cmas =
                 | '-' ->
                     Format.eprintf "Ignoring jsoo option passed: %s\n%!" s;
                     None
-                | '+' -> 
-                    Some (String.sub s 1 (String.length s - 1) |> Fpath.v)
+                | '+' -> Some (String.sub s 1 (String.length s - 1) |> Fpath.v)
                 | _ ->
                     Format.eprintf "Bad js file for: (%s,%s,%s) (%s)\n%!"
                       universe pkg version s;
@@ -202,7 +208,8 @@ let do_jsoo root pkg_contents findlib_cmas =
           in
 
           let toplevel =
-            Jsoo.Toplevel.{ package; cma_fpath; js_files; dep_cmas; cmis; digest=None }
+            Jsoo.Toplevel.
+              { package; cma_fpath; js_files; dep_cmas; cmis; digest = None }
           in
           Jsoo.Toplevel.build_toplevel toplevel;
           Jsoo.Toplevel.copy_js_files root toplevel;
@@ -211,7 +218,9 @@ let do_jsoo root pkg_contents findlib_cmas =
     pkg_contents
 
 type pkg_kind = [ `Prep | `Reference ]
-let run _ (universes : (string * string) list) (extra_universes : (string * string) list) =
+
+let run _ (universes : (string * string) list)
+    (extra_universes : (string * string) list) =
   let get_universe =
     match universes with
     | [] ->
@@ -226,11 +235,18 @@ let run _ (universes : (string * string) list) (extra_universes : (string * stri
           Some ((universe, pkg.Opam.name, pkg.version), `Prep)
     | _ -> (
         fun pkg ->
-          try Some ((List.assoc pkg.Opam.name universes, pkg.name, pkg.version), `Prep)
-          with Not_found -> (try
-            Some ((List.assoc pkg.Opam.name extra_universes, pkg.name, pkg.version), `Reference)
-          with Not_found ->
-            None))
+          try
+            Some
+              ( (List.assoc pkg.Opam.name universes, pkg.name, pkg.version),
+                `Prep )
+          with Not_found -> (
+            try
+              Some
+                ( ( List.assoc pkg.Opam.name extra_universes,
+                    pkg.name,
+                    pkg.version ),
+                  `Reference )
+            with Not_found -> None))
   in
 
   let packages =
@@ -263,18 +279,18 @@ let run _ (universes : (string * string) list) (extra_universes : (string * stri
   let root = Opam.prefix () |> Fpath.v in
   let pkg_contents =
     List.map
-      (fun ((_, pkg_name, _) as package, ty) ->
+      (fun (((_, pkg_name, _) as package), ty) ->
         (package, ty, Opam.pkg_contents pkg_name))
       packages
   in
   List.iter
     (fun (package, ty, files) ->
-      if ty=`Prep then process_package root package files)
+      if ty = `Prep then process_package root package files)
     pkg_contents;
   List.iter
     (fun (package, ty) ->
       let _, name, version = package in
-      match Opam.opam_file name version, ty with
+      match (Opam.opam_file name version, ty) with
       | Some lines, `Prep ->
           let dest = Package.prep_path package in
           Util.write_file Fpath.(dest / "opam") lines

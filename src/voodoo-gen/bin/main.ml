@@ -113,22 +113,25 @@ let generate_pkgver output name_filter version_filter =
             Odoc_thtml.gen_package_info ~input:parent ~output:output_prefix
               paths;
             Odoc_thtml.render_other ~parent ~otherdocs ~output |> get_ok;
-            if Option.is_none universe then begin
+            if Option.is_none universe then (
               Bos.OS.File.write
                 Fpath.(output_prefix / "status.json")
                 (if failed then {|"Failed"|} else {|"Built"|})
               |> get_ok;
-              let actual_universe = Bos.OS.File.read Fpath.(pkg_path / "universe.txt") |> get_ok in
+              let actual_universe =
+                Bos.OS.File.read Fpath.(pkg_path / "universe.txt") |> get_ok
+              in
               let json : Yojson.t =
-                `Assoc [
-                  "success", `Bool true;
-                  "universe", `String actual_universe
-                ]
+                `Assoc
+                  [
+                    ("success", `Bool true);
+                    ("universe", `String actual_universe);
+                  ]
               in
               Bos.OS.File.write
                 Fpath.(output_prefix / "status2.json")
-                (Yojson.pretty_to_string json) |> get_ok
-            end
+                (Yojson.pretty_to_string json)
+              |> get_ok)
       in
 
       List.iter handle_package pkgs

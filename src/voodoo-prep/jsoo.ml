@@ -1,4 +1,4 @@
-module StringSet = Set.Make(String)
+module StringSet = Set.Make (String)
 
 module Cma = struct
   type t = { cma_fpath : Fpath.t; package : Package.t }
@@ -64,9 +64,13 @@ module Cmi = struct
     String.compare s1 s2
 
   let copy universes cmis =
-    let cmis = List.filter (fun cmi ->
-      let (uid, _, _) = cmi.package in
-      StringSet.mem uid universes) cmis in
+    let cmis =
+      List.filter
+        (fun cmi ->
+          let uid, _, _ = cmi.package in
+          StringSet.mem uid universes)
+        cmis
+    in
     let l = List.map (fun cmi -> (prep_path cmi, output_path cmi)) cmis in
     let dst_dirs =
       List.map
@@ -117,7 +121,8 @@ module Toplevel = struct
 
   let digested_path vv =
     match vv.digest with
-    | Some digest -> Fpath.(Paths.jsoo / "toplevel-by-digest" / digest / "toplevel.js")
+    | Some digest ->
+        Fpath.(Paths.jsoo / "toplevel-by-digest" / digest / "toplevel.js")
     | None -> failwith "No digest"
 
   let marshal v =
@@ -132,8 +137,7 @@ module Toplevel = struct
     close_in ic;
     result
 
-  let toplevel_ml _ =
-    [ "let () = Js_top_worker.Worker.run ()" ]
+  let toplevel_ml _ = [ "let () = Js_top_worker.Worker.run ()" ]
 
   let build_toplevel vv =
     let path = Fpath.(Package.prep_path vv.package / "top_worker_main.ml") in
@@ -152,21 +156,24 @@ module Toplevel = struct
   let copy_js_files root vv =
     let dest_path = js_dest_path vv in
     Util.mkdir_p dest_path;
-    List.iter (fun js ->
-      let src = Fpath.(root // v "lib" // js) in
-      let dst = Fpath.(dest_path // js) in
-      let (dir, _) = Fpath.split_base dst in
-      Util.mkdir_p dir;
-      Util.cp src dst) vv.js_files
+    List.iter
+      (fun js ->
+        let src = Fpath.(root // v "lib" // js) in
+        let dst = Fpath.(dest_path // js) in
+        let dir, _ = Fpath.split_base dst in
+        Util.mkdir_p dir;
+        Util.cp src dst)
+      vv.js_files
 
   let cmd (vv : t) =
-    let cmd = Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty" % "--no-cmis") in
+    let cmd =
+      Bos.Cmd.(v "js_of_ocaml" % "--toplevel" % "--pretty" % "--no-cmis")
+    in
     let js f = Fpath.(js_dest_path vv // f |> to_string) in
     let cmd =
       List.fold_right
         (fun a cmd -> Bos.Cmd.(cmd % a))
-        (List.map js vv.js_files
-        @ [ "+toplevel.js"; "+dynlink.js" ])
+        (List.map js vv.js_files @ [ "+toplevel.js"; "+dynlink.js" ])
         cmd
     in
     let cmd =
@@ -196,14 +203,19 @@ let handle_toplevel toplevel_fpath =
   Format.printf "Toplevel: %a\n%!" Bos.Cmd.pp cmd;
   try
     ignore @@ Util.lines_of_process cmd;
-    let digest = Some (Digest.file (Fpath.to_string @@ Toplevel.output_path toplevel) |> Digest.to_hex) in
+    let digest =
+      Some
+        (Digest.file (Fpath.to_string @@ Toplevel.output_path toplevel)
+        |> Digest.to_hex)
+    in
     let toplevel = { toplevel with digest } in
     let digested_dir, _ = Fpath.split_base (Toplevel.digested_path toplevel) in
     Util.mkdir_p digested_dir;
     Util.mv (Toplevel.output_path toplevel) (Toplevel.digested_path toplevel);
     Some { toplevel with digest }
   with e ->
-    Format.eprintf "Caught failure building js toplevel: %s\n%!" (Printexc.to_string e);
+    Format.eprintf "Caught failure building js toplevel: %s\n%!"
+      (Printexc.to_string e);
     let lines = Util.lines_of_process Bos.Cmd.(v "ls" % "-lR") in
     List.iter (fun line -> Format.eprintf "> %s\n%!" line) lines;
     exit 1
@@ -213,14 +225,16 @@ type config = {
   cma : string;
   dep_cmas : (string * string) list;
   cmis : string list;
-  digest : string
-} [@@deriving yojson]
+  digest : string;
+}
+[@@deriving yojson]
 
 type config_list = config list [@@deriving yojson]
+
 let run path package =
   match
     Bos.OS.Dir.fold_contents
-      (fun fpath (acc,universes) ->
+      (fun fpath (acc, universes) ->
         let rel_fpath =
           match Fpath.relativize ~root:path fpath with
           | Some x -> x
@@ -228,10 +242,12 @@ let run path package =
         in
 
         let segs = Fpath.segs rel_fpath in
-        let universes = match segs with
-        | "universes" :: universe_id :: _ ->
-          StringSet.add universe_id universes
-        | _ -> universes in 
+        let universes =
+          match segs with
+          | "universes" :: universe_id :: _ ->
+              StringSet.add universe_id universes
+          | _ -> universes
+        in
 
         let path_relevant =
           match (package, segs) with
@@ -261,27 +277,52 @@ let run path package =
       let cmis = List.sort_uniq Cmi.compare cmis in
       Cmi.copy universes cmis;
       (* Output json like:
-      [ 
-        { "package": "base",
-          "cma": "base.cma.worker.js",
-          "dep_cmas": [ [ "/jsoo/universes/abcde/sexplib0/sexplib0.cma.js", "sexplib_dot_cma" ] ],
-          "cmis": [ ... ]
-        ...
-      ]
+         [
+           { "package": "base",
+             "cma": "base.cma.worker.js",
+             "dep_cmas": [ [ "/jsoo/universes/abcde/sexplib0/sexplib0.cma.js", "sexplib_dot_cma" ] ],
+             "cmis": [ ... ]
+           ...
+         ]
       *)
-      let packages = List.map (fun t -> t.Toplevel.package) toplevels |> List.sort_uniq Package.compare in
-      List.iter (fun package ->
-        let pkg_toplevels = List.filter (fun t -> t.Toplevel.package = package) toplevels in
-        let toplevels = List.map (fun t ->
-          let name = Fpath.basename t.Toplevel.cma_fpath in
-          { package = name;
-            cma = Toplevel.js_name t;
-            dep_cmas = List.map (fun cma -> (Cma.server_path cma |> Fpath.to_string, Cma.func_name cma)) t.dep_cmas;
-            cmis = List.map (fun cmi -> Cmi.server_path cmi |> Fpath.to_string) t.cmis;
-            digest = match t.digest with | Some d -> d | None -> failwith "No digest" }) pkg_toplevels in
-        let toplevel_json = config_list_to_yojson toplevels in 
-        Util.write_file Fpath.(Package.jsoo_path package / "toplevels.json")
-          [Yojson.Safe.to_string toplevel_json ]) packages
+      let packages =
+        List.map (fun t -> t.Toplevel.package) toplevels
+        |> List.sort_uniq Package.compare
+      in
+      List.iter
+        (fun package ->
+          let pkg_toplevels =
+            List.filter (fun t -> t.Toplevel.package = package) toplevels
+          in
+          let toplevels =
+            List.map
+              (fun t ->
+                let name = Fpath.basename t.Toplevel.cma_fpath in
+                {
+                  package = name;
+                  cma = Toplevel.js_name t;
+                  dep_cmas =
+                    List.map
+                      (fun cma ->
+                        ( Cma.server_path cma |> Fpath.to_string,
+                          Cma.func_name cma ))
+                      t.dep_cmas;
+                  cmis =
+                    List.map
+                      (fun cmi -> Cmi.server_path cmi |> Fpath.to_string)
+                      t.cmis;
+                  digest =
+                    (match t.digest with
+                    | Some d -> d
+                    | None -> failwith "No digest");
+                })
+              pkg_toplevels
+          in
+          let toplevel_json = config_list_to_yojson toplevels in
+          Util.write_file
+            Fpath.(Package.jsoo_path package / "toplevels.json")
+            [ Yojson.Safe.to_string toplevel_json ])
+        packages
   | Error (`Msg m) ->
       Format.eprintf "Error while scanning: %s\n%!" m;
       exit 1

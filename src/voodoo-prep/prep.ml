@@ -43,12 +43,15 @@ module Prep = struct
       & info [ "u"; "universes" ] ~doc)
 
   let extra_universes =
-    let doc = "Provide extra universes as 'package=universe id' couples. These will not be prepped but can be referenced by jsoo toplevels." in
+    let doc =
+      "Provide extra universes as 'package=universe id' couples. These will \
+       not be prepped but can be referenced by jsoo toplevels."
+    in
     Arg.(
       value
       & opt (list (pair ~sep:':' string string)) []
       & info [ "v"; "extra-universes" ] ~doc)
-    
+
   let cmd = Term.(const prep $ lib_dir $ switch $ universes $ extra_universes)
 
   let info = Term.info "prep" ~doc:"Prep a directory tree for compiling"

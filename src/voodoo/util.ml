@@ -32,9 +32,12 @@ let lines_of_channel ic =
   inner []
 
 let lines_of_process cmd =
-  match OS.Cmd.(run_out ~err:err_stderr cmd |> to_lines) with
+  match
+    OS.Cmd.(run_out ~err:err_stderr cmd |> to_lines)
+  with
   | Ok x -> x
-  | Error (`Msg e) -> failwith ("Error: " ^ e)
+  | Error (`Msg e) ->
+      failwith ("Error: " ^ e)
 
 let mkdir_p d =
   let segs =
