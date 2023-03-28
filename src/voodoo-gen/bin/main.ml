@@ -39,6 +39,24 @@ let get_ok = function
       Format.eprintf "get_ok: Failure! msg=%s\n%!" m;
       failwith "get_ok: Not OK"
 
+let mkdir_p d =
+  let segs =
+    Fpath.segs (Fpath.normalize d) |> List.filter (fun s -> String.length s > 0)
+  in
+  let _ =
+    List.fold_left
+      (fun path seg ->
+        let d = Fpath.(path // v seg) in
+        try
+          Unix.mkdir (Fpath.to_string d) 0o755;
+          d
+        with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> d
+        | exn -> raise exn)
+      (Fpath.v ".") segs
+  in
+  ()
+      
 let generate_pkgver output_dir name_filter version_filter =
   let linkedpath = Fpath.(v "linked") in
   match
@@ -77,6 +95,7 @@ let generate_pkgver output_dir name_filter version_filter =
             (fun p files ->
               match Fpath.get_ext p with
               | ".odocl" -> { files with odocls = p :: files.odocls }
+              | ".odoc" -> {files with odocls = p :: files.odocls }
               | _ -> (
                   match Fpath.basename p with
                   | "opam" -> { files with opam = Some p }
@@ -112,10 +131,15 @@ let generate_pkgver output_dir name_filter version_filter =
               in
               Fpath.normalize @@ Odoc_odoc.Fs.File.append output_dir output_path
             in
-            let paths =
-              List.rev_map (Odoc_thtml.render ~output) files
-              |> List.rev_map get_ok |> List.flatten
-            in
+            mkdir_p Fpath.(pkg_path / "src");
+            List.iter (fun file ->
+              let cmd = Bos.Cmd.(v "odoc" % "html-generate" % "--as-json" % "--source-root" % Fpath.(pkg_path / "src" |> to_string) % "-o" % Odoc_odoc.Fs.Directory.to_string output_dir % Fpath.to_string file) in
+              Format.eprintf "cmd: %a\n%!" Bos.Cmd.pp cmd;
+              match Bos.OS.Cmd.(run_out cmd |> to_string) with
+              | Ok _out -> ()
+              | Error (`Msg m) -> Format.eprintf "Error executing html-generate: %s\n%!" m
+                ) files;
+            let paths = [] in
             let foutput =
               Fpath.v (Odoc_odoc.Fs.Directory.to_string output_dir)
             in

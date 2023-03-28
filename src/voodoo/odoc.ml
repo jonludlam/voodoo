@@ -112,10 +112,10 @@ let generate_targets odocl ty =
 
 type child =
   | CModule of string (* module name, e.g. 'String' *)
-  | CPage of string
-(* page name, e.g. 'packages' *)
+  | CPage of string (* page name, e.g. 'packages' *)
+  | CSrc of string (* 'src' *)
 
-let compile ?parent ?output path ~includes ~children =
+let compile ?parent ?output ?source path ~includes ~children =
   let cmd = Bos.Cmd.(v "odoc" % "compile" % Fpath.to_string path) in
   let cmd =
     match output with
@@ -124,7 +124,7 @@ let compile ?parent ?output path ~includes ~children =
   in
   let cmd =
     match parent with
-    | Some str -> Bos.Cmd.(cmd % "--parent" % Printf.sprintf "\"%s\"" str)
+    | Some str -> Bos.Cmd.(cmd % "--parent" % Printf.sprintf "page-\"%s\"" str)
     | None -> cmd
   in
   let cmd =
@@ -133,12 +133,18 @@ let compile ?parent ?output path ~includes ~children =
       includes cmd
   in
   let cmd =
+    match source with
+    | Some (parent, file) -> Bos.Cmd.(cmd % "--source-parent-file" % parent % "--source-name" % file)
+    | None -> cmd
+  in
+  let cmd =
     List.fold_left
       (fun cmd c ->
         let arg =
           match c with
           | CModule m -> "module-" ^ m
           | CPage p -> "page-\"" ^ p ^ "\""
+          | CSrc p -> "src-" ^ p
         in
         Bos.Cmd.(cmd % "--child" % arg))
       cmd children
@@ -146,6 +152,20 @@ let compile ?parent ?output path ~includes ~children =
   Format.eprintf "compile command: %a\n%!" Bos.Cmd.pp cmd;
   Util.lines_of_process cmd
 
+  let source_tree parent ?output path include_ =
+    let cmd = Bos.Cmd.(v "odoc" % "source-tree" % Fpath.to_string path) in
+    let cmd =
+      match output with
+      | Some fpath -> Bos.Cmd.(cmd % "-o" % Fpath.to_string fpath)
+      | None -> cmd
+    in
+    let cmd =
+      Bos.Cmd.(cmd % "-I" % Fpath.to_string include_)
+    in  
+    let cmd = Bos.Cmd.(cmd % "--parent" % Printf.sprintf "page-\"%s\"" parent) in
+    Format.eprintf "source-tree command: %a\n%!" Bos.Cmd.pp cmd;
+    Util.lines_of_process cmd
+  
 let link path ~includes ~output =
   let cmd =
     Bos.Cmd.(

@@ -8,10 +8,16 @@ type actions = {
   objinfo : Fpath.t list;
 }
 
-let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
- fun root package files ->
+let process_package : Fpath.t -> Package.t -> Fpath.t list -> (Fpath.t * Fpath.t) list -> Fpath.t -> unit =
+ fun root package files src_files build_path ->
   let dest = Package.prep_path package in
-
+  let src_dest = Fpath.(dest / "src") in
+  let () =
+    let (_, name, version) = package in
+    Format.eprintf "pkg: %s %s\n%!" name version;
+    List.iter (fun (fpath, rpath) ->
+      Format.eprintf "%a -> %a\n%!" Fpath.pp fpath Fpath.pp rpath) src_files
+  in
   (* Some packages produce ocaml artefacts that can't be processed with the switch's
       ocaml compiler - most notably the secondary compiler! This switch is intended to
       be used to ignore those files *)
@@ -52,8 +58,9 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     let objinfo = if is_cma then fpath :: acc.objinfo else acc.objinfo in
     { copy; info; objinfo }
   in
+  let copy = List.map (fun (fpath, rpath) -> Fpath.(fpath, src_dest // rpath)) src_files in
   let actions =
-    List.fold_right foldfn files { copy = []; info = []; objinfo = [] }
+    List.fold_right foldfn files { copy; info = []; objinfo = [] }
   in
   List.iter
     (fun (src, dst) ->
@@ -68,7 +75,49 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
           Bos.Cmd.(v "ocamlobjinfo" % Fpath.(to_string (root // fpath)))
       in
       Util.write_file Fpath.(dest // set_ext "ocamlobjinfo" fpath) lines)
-    actions.objinfo
+    actions.objinfo;
+  let lines =
+    let (>>=) = Result.bind in
+    Bos.OS.Dir.with_current build_path (fun () ->
+    Bos.OS.File.exists (Fpath.v "dune-project") >>= fun v1 ->
+    Bos.OS.Dir.exists (Fpath.v "_build/default") >>= fun v2 ->
+    if v1 && v2 then begin
+      Bos.OS.Dir.fold_contents ~dotfiles:true (fun p acc ->
+        Format.eprintf "YYY: %a\n%!" Fpath.pp p;
+        if Fpath.has_ext ".cmt" p then p::acc else acc) [] Fpath.(v "_build") >>= fun cmts ->
+      if List.length cmts = 0
+      then Ok []
+      else begin
+        Format.eprintf "YYY: %d cmts\n%!" (List.length cmts);
+        let (_, name, _) = package in
+        try
+          let lines =
+            let cmd_base = Bos.Cmd.(v "dune" % "rules" % "-p" % name) in
+            let cmd = List.fold_left (fun acc cmt ->
+                Bos.Cmd.(acc % Fpath.to_string cmt)) cmd_base cmts in
+            Format.eprintf "cmd '%a'\n%!" Bos.Cmd.pp cmd;
+
+            Util.lines_of_process cmd
+          in
+          Format.eprintf "Got %d lines" (List.length lines);
+          Ok lines
+        with _ ->
+          Format.eprintf "Failure of cmd\n%!";
+          Ok []
+      end
+    end else begin
+      Ok []
+    end) ()
+  in
+  match lines with
+  | Ok (Ok l) ->
+    if List.length l > 0 then
+      Util.write_file Fpath.(dest / "dune_rules") l
+  | _ -> ()
+  
+
+
+  
 
 let run _ (universes : (string * string) list) =
   let get_universe =
@@ -97,14 +146,32 @@ let run _ (universes : (string * string) list) =
          []
   in
   let root = Opam.prefix () |> Fpath.v in
+  let pkg_src build_path =
+    let src_root = build_path in
+    let src_files =
+      let dune_src_root = Fpath.(src_root / "_build" / "default") in
+      match Bos.OS.Dir.exists dune_src_root with
+      | Ok true ->
+        Bos.OS.Dir.fold_contents (fun p acc ->
+          if Fpath.has_ext ".ml" p then (p, Fpath.relativize ~root:dune_src_root p |> Option.get) :: acc else acc) [] dune_src_root
+      | _ ->
+        Bos.OS.Dir.fold_contents (fun p acc ->
+          if Fpath.has_ext ".ml" p then (p, Fpath.relativize ~root:src_root p |> Option.get) :: acc else acc) [] dune_src_root
+    in
+    Result.value ~default:[] src_files
+  in
+        
   let pkg_contents =
     List.map
-      (fun ((_, pkg_name, _) as package) ->
-        (package, Opam.pkg_contents pkg_name))
+      (fun ((_, name, version) as package) ->
+
+        let build_path = Fpath.(root / ".opam-switch" / "build" / Printf.sprintf "%s.%s" name version) in
+
+        (package, Opam.pkg_contents name, pkg_src build_path, build_path))
       packages
   in
   List.iter
-    (fun (package, files) -> process_package root package files)
+    (fun (package, files, src_files, build_path) -> process_package root package files src_files build_path)
     pkg_contents;
   List.iter
     (fun package ->

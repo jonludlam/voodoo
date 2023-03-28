@@ -43,7 +43,7 @@ let rec block : 'attr block -> intermediate = function
   | Blockquote (_, _bs) -> Bl []
   | Thematic_break _ -> Bl []
   | Heading (_, n, i) ->
-      It (Heading { label = None; level = n; title = inline i })
+      It (Heading { label = None; level = n; title = inline i; source_anchor = None })
   | Code_block (_, _a, b) ->
       Bl
         [
@@ -72,9 +72,9 @@ let of_content content ~name ~url =
   let items = List.map (function It x -> x | Bl x -> Text x) intermediate in
   Ok
     (match items with
-    | [] -> Odoc_document.Types.Page.{ preamble = []; items = []; url }
+    | [] -> Odoc_document.Types.Page.{ preamble = []; items = []; url; source_anchor = None }
     | (Heading _ as x) :: rest ->
-        Odoc_document.Types.Page.{ preamble = [ x ]; items = rest; url }
+        Odoc_document.Types.Page.{ preamble = [ x ]; items = rest; url; source_anchor = None }
     | _ ->
         Odoc_document.Types.Page.
           {
@@ -85,10 +85,12 @@ let of_content content ~name ~url =
                     label = None;
                     level = 1;
                     title = [ { desc = Text name; attr = [] } ];
+                    source_anchor = None;
                   };
               ];
             items;
             url;
+            source_anchor = None;
           })
 
 let read_org f url =
@@ -121,6 +123,8 @@ let read_plain f url =
                 label = None;
                 level = 1;
                 title = [ { desc = Text name; attr = [] } ];
+                source_anchor = None;
               };
           ];
+        source_anchor = None;
       }

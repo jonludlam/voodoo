@@ -9,8 +9,10 @@ let document_of_odocl ~syntax input =
   match unit.content with
   | Odoc_file.Page_content odoctree ->
       Ok (Renderer.document_of_page ~syntax odoctree)
-  | Unit_content odoctree ->
+  | Unit_content (odoctree, _) ->
       Ok (Renderer.document_of_compilation_unit ~syntax odoctree)
+  | Source_tree_content _ ->
+      Error (`Msg "Erg")
 
 let render_document ~output odoctree =
   let aux pages =
@@ -86,24 +88,26 @@ let render ~output file =
                 get_subpages subpage.content)
          |> List.flatten)
     in
-    get_subpages document
+    match document with
+    | Odoc_document.Types.Document.Page p -> get_subpages p
+    | _ -> [] 
   in
   Ok urls
 
 let render_text ~id ~output doc =
   let url = Odoc_document.Url.Path.from_identifier id in
-  Markdown.read_plain doc url >>= render_document ~output
+  Markdown.read_plain doc url >>= fun p -> render_document ~output (Page p)
 
 let render_markdown ~id ~output doc =
   let url = Odoc_document.Url.Path.from_identifier id in
   match Markdown.read_md doc url with
-  | Ok page -> render_document ~output page
+  | Ok page -> render_document ~output (Page page)
   | Error _ -> render_text ~id ~output doc
 
 let render_org ~id ~output doc =
   let url = Odoc_document.Url.Path.from_identifier id in
   match Markdown.read_org doc url with
-  | Ok page -> render_document ~output page
+  | Ok page -> render_document ~output (Page page)
   | Error _ -> render_text ~id ~output doc
 
 let render_other ~output ~parent ~otherdocs =
