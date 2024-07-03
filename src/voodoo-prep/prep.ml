@@ -26,14 +26,14 @@ let process_package : Fpath.t -> Package.t -> Fpath.t list -> unit =
     let ext = Fpath.get_ext filename in
     let no_ext = Fpath.rem_ext filename in
     let has_hyphen = String.contains (Fpath.to_string filename) '-' in
-    let is_module =
+    let is_cool =
       process_ocaml_artefacts
-      && List.mem ext [ ".cmt"; ".cmti"; ".cmi" ]
+      && List.mem ext [ ".cmt"; ".cmti"; ".cmi"; ".ml"; ".cma"; ".cmxa"; ]
       && not has_hyphen
     in
     let do_copy =
       (not in_build_dir)
-      && (is_in_doc_dir || is_module
+      && (is_in_doc_dir || is_cool
          || List.mem no_ext (List.map Fpath.v [ "META"; "dune-package" ]))
     in
     let is_cma = process_ocaml_artefacts && List.mem ext [ ".cma"; ".cmxa" ] in
